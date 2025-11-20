@@ -10,7 +10,7 @@ import (
 
 )
 
-func TestConfigGlobalLogger(t *testing.T) {
+func TestMakeUrl(t *testing.T) {
 	testCases := []struct {
 		name        string
 		latitude    float64
