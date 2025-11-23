@@ -20,7 +20,7 @@ type Options struct {
 	Verbose      bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
 }
 
-func dealWithMention(log *zap.SugaredLogger, client *mastodon.Client) {
+func dealWithMention(log *zap.SugaredLogger, client *mastodon.Client, notification *mastodon.Notification) {
 	// first check whether the coords are already in the url
 
 	// then try opening the url, and use the url we got redirected to, and see if it has the coords
@@ -55,10 +55,9 @@ func doUserActions(log *zap.SugaredLogger, client *mastodon.Client) {
 					if err != nil {
 						log.Errorw("failed to dismiss notification", "notificationID", n.ID, "err", err)
 					}
-					return
 				}()
 			} else {
-				go dealWithMention(log, client)
+				go dealWithMention(log, client, n)
 			}
 
 		}

@@ -1,7 +1,7 @@
 package gmaps
 
 import (
-	// "errors"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,7 +63,7 @@ func TestObfusicatedLatLong(t *testing.T) {
 		}
 	}{
 		{
-			name: "obfusicatedUrl",
+			name: "obfuscatedUrl",
 			url:  "https://www.google.com/maps/place/Mussenden+Temple/data=!4m7!3m6!1s0x48602287e2f8db07:0xa0c2c065afc70175!8m2!3d55.1677806!4d-6.8108972!16zL20vMDZndzVw!19sChIJB9v44ociYEgRdQHHr2XAwqA?coh=277533&entry=tts&g_ep=EgoyMDI1MTExNy4wIPu8ASoASAFQAw%3D%3D&skid=6864092b-d6e1-4c04-8864-4ec8b7c0d841",
 			expected: struct {
 				coord coordinate
@@ -73,28 +73,28 @@ func TestObfusicatedLatLong(t *testing.T) {
 				err:   nil,
 			},
 		},
-		// {
-		// 	name: "obviousUrl",
-		// 	url:  "https://www.google.com/maps/search/54.375880,+-5.551608?entry=tts&g_ep=EgoyMDI1MTExNy4wIPu8ASoASAFQAw%3D%3D&skid=b6f8004e-1d60-49c0-b344-2186a6902830",
-		// 	expected: struct {
-		// 		coord coordinate
-		// 		err   error
-		// 	}{
-		// 		coord: coordinate{54.375880, -5.551608},
-		// 		err:   nil,
-		// 	},
-		// },
-		// {
-		// 	name: "totallyInvalidUrl",
-		// 	url:  "https://www.google.com/maps/search/54.375880,+-5.551608?entry=tts&g_ep=EgoyMDI1MTExNy4wIPu8ASoASAFQAw%3D%3D&skid=b6f8004e-1d60-49c0-b344-2186a6902830",
-		// 	expected: struct {
-		// 		coord coordinate
-		// 		err   error
-		// 	}{
-		// 		coord: coordinate{0, 0},
-		// 		err:   errors.New("no coordinates detected"),
-		// 	},
-		// },
+		{
+			name: "obviousUrl",
+			url:  "https://www.google.com/maps/search/54.375880,+-5.551608?entry=tts&g_ep=EgoyMDI1MTExNy4wIPu8ASoASAFQAw%3D%3D&skid=b6f8004e-1d60-49c0-b344-2186a6902830",
+			expected: struct {
+				coord coordinate
+				err   error
+			}{
+				coord: coordinate{54.375880, -5.551608},
+				err:   nil,
+			},
+		},
+		{
+			name: "totallyInvalidUrl",
+			url:  "https://www.yahoo.com/maps/search/fthjdfgsjkhsdtgjkhfstgjkhfjtghksjkmfghbjkh",
+			expected: struct {
+				coord coordinate
+				err   error
+			}{
+				coord: coordinate{0, 0},
+				err:   errors.New("no coordinates detected, latitude detection failed"),
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
