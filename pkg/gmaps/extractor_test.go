@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 	"testing"
 
 	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/gmaps"
@@ -233,7 +232,7 @@ func TestCoordinateValidation(t *testing.T) {
 	}
 }
 
-// mockRedirectHTTPClient simulates following HTTP redirects
+// mockRedirectHTTPClient simulates HTTP HEAD requests with 302 redirects
 type mockRedirectHTTPClient struct {
 	redirectMap map[string]string
 }
@@ -242,23 +241,16 @@ func (m *mockRedirectHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	originalURL := req.URL.String()
 
 	// Check if we have a redirect for this URL
-	if finalURL, ok := m.redirectMap[originalURL]; ok {
-		// Parse the final URL
-		parsedURL, err := url.Parse(finalURL)
-		if err != nil {
-			return nil, err
-		}
-
-		// Create a new request with the final URL (simulating the redirect being followed)
-		finalReq := &http.Request{
-			Method: "GET",
-			URL:    parsedURL,
-		}
+	if locationURL, ok := m.redirectMap[originalURL]; ok {
+		// Return a 302 response with Location header (simulating what the actual HEAD request returns)
+		header := http.Header{}
+		header.Set("Location", locationURL)
 
 		return &http.Response{
-			StatusCode: http.StatusOK,
+			StatusCode: http.StatusFound, // 302
+			Header:     header,
 			Body:       io.NopCloser(bytes.NewBufferString("")),
-			Request:    finalReq,
+			Request:    req,
 		}, nil
 	}
 

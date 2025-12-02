@@ -19,10 +19,9 @@ func NewRateLimitedClient(maxRedirects int, requestsPerSecond float64) *RateLimi
 
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				return http.ErrUseLastResponse
-			}
-			return nil
+			// Don't follow redirects automatically - we handle them manually
+			// to read the Location header from the first redirect response
+			return http.ErrUseLastResponse
 		},
 		Timeout: 30 * time.Second,
 	}

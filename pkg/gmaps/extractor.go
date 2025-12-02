@@ -3,7 +3,6 @@ package gmaps
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -54,9 +53,6 @@ var (
 
 	// Matches coordinates in the path like /maps/place/name/data=...!3d-12.345!4d67.890
 	dataCoordRegex = regexp.MustCompile(`!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)`)
-
-	// Try to find coordinates anywhere in HTML meta tags or JSON
-	htmlCoordRegex = regexp.MustCompile(`"(-?\d+\.?\d*),\s*(-?\d+\.?\d*)"`)
 )
 
 // ExtractCoordinates attempts to extract coordinates from a Google Maps URL
@@ -122,9 +118,9 @@ func (e *Extractor) parseCoordinatesFromURL(urlStr string) (*Coordinates, error)
 	return nil, fmt.Errorf("no coordinates found in URL")
 }
 
-// extractByFollowingURL makes an HTTP request to follow redirects and extract coordinates
+// extractByFollowingURL makes an HTTP HEAD request and extracts coordinates from the Location header
 func (e *Extractor) extractByFollowingURL(ctx context.Context, urlStr string) (*Coordinates, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", urlStr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -138,52 +134,23 @@ func (e *Extractor) extractByFollowingURL(ctx context.Context, urlStr string) (*
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
-	}
-
-	// Try to extract from the final URL after redirects
-	finalURL := resp.Request.URL.String()
-	e.logger.Debugw("Followed redirects to final URL", "original", urlStr, "final", finalURL)
-
-	coords, err := e.parseCoordinatesFromURL(finalURL)
-	if err == nil {
-		return coords, nil
-	}
-
-	// Last resort: try to extract from the HTML body
-	// Read a limited amount of the body to avoid memory issues
-	limitedReader := io.LimitReader(resp.Body, 1024*1024) // 1MB limit
-	body, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	return e.extractFromHTML(string(body))
-}
-
-// extractFromHTML attempts to find coordinates in HTML content
-func (e *Extractor) extractFromHTML(html string) (*Coordinates, error) {
-	// Look for coordinates in meta tags or JSON structures
-	// This is a best-effort attempt
-	matches := htmlCoordRegex.FindAllStringSubmatch(html, -1)
-
-	for _, match := range matches {
-		if len(match) >= 3 {
-			lat, err1 := strconv.ParseFloat(match[1], 64)
-			lon, err2 := strconv.ParseFloat(match[2], 64)
-
-			if err1 == nil && err2 == nil {
-				// Sanity check: latitude should be -90 to 90, longitude -180 to 180
-				if lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 {
-					e.logger.Debugw("Extracted coordinates from HTML", "lat", lat, "lon", lon)
-					return &Coordinates{Latitude: lat, Longitude: lon}, nil
-				}
-			}
+	// For redirect responses (3xx), check the Location header
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		location := resp.Header.Get("Location")
+		if location != "" {
+			e.logger.Debugw("Got redirect location", "original", urlStr, "location", location)
+			return e.parseCoordinatesFromURL(location)
 		}
 	}
 
-	return nil, fmt.Errorf("no valid coordinates found in HTML")
+	// For non-redirect responses, try to use the request URL after any automatic redirects
+	if resp.StatusCode == http.StatusOK && resp.Request != nil {
+		finalURL := resp.Request.URL.String()
+		e.logger.Debugw("Followed redirects to final URL", "original", urlStr, "final", finalURL)
+		return e.parseCoordinatesFromURL(finalURL)
+	}
+
+	return nil, fmt.Errorf("no redirect or valid response: status %d", resp.StatusCode)
 }
 
 // parseCoordMatch parses coordinate strings into a Coordinates struct
