@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	zlog "log"
+	"math/rand"
 	"time"
 
 	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/gmaps"
@@ -154,28 +155,51 @@ func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) 
 	return nil
 }
 
-// Run starts the bot's main polling loop
-func (b *Bot) Run(ctx context.Context, pollInterval time.Duration) {
-	b.logger.Infow("Starting bot polling loop", "interval", pollInterval)
+// Run starts the bot's main polling loop with jitter and exponential backoff
+func (b *Bot) Run(ctx context.Context, basePollInterval time.Duration) {
+	b.logger.Infow("Starting bot polling loop", "baseInterval", basePollInterval)
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	currentInterval := basePollInterval
+	consecutiveErrors := 0
+	maxBackoff := basePollInterval * 8 // Max 8x the base interval
 
 	// Process notifications immediately on startup
 	if err := b.processNotifications(ctx); err != nil {
 		b.logger.Errorw("Error processing notifications", "error", err)
+		consecutiveErrors++
 	}
 
 	// Then continue polling
 	for {
+		// Add jitter: ±10% of current interval
+		jitter := time.Duration(rand.Int63n(int64(currentInterval) / 5)) - currentInterval/10
+		nextPoll := currentInterval + jitter
+
+		b.logger.Debugw("Scheduling next poll", "interval", nextPoll, "jitter", jitter)
+
 		select {
 		case <-ctx.Done():
 			b.logger.Info("Bot shutting down")
 			return
-		case <-ticker.C:
+		case <-time.After(nextPoll):
 			b.logger.Debug("Polling for notifications")
 			if err := b.processNotifications(ctx); err != nil {
 				b.logger.Errorw("Error processing notifications", "error", err)
+				consecutiveErrors++
+
+				// Exponential backoff on errors
+				currentInterval *= 2
+				if currentInterval > maxBackoff {
+					currentInterval = maxBackoff
+				}
+				b.logger.Warnw("Backing off due to errors", "newInterval", currentInterval, "consecutiveErrors", consecutiveErrors)
+			} else {
+				// Success - reset to base interval
+				if consecutiveErrors > 0 {
+					b.logger.Infow("Polling successful, resetting interval", "interval", basePollInterval)
+					consecutiveErrors = 0
+					currentInterval = basePollInterval
+				}
 			}
 		}
 	}

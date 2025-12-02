@@ -27,6 +27,7 @@ func NewGenerator(extractor *gmaps.Extractor, logger *zap.SugaredLogger) *Genera
 type ConversionResult struct {
 	OriginalURL string
 	OSMUrl      string
+	OSMAppUrl   string
 	Error       error
 }
 
@@ -57,10 +58,12 @@ func (g *Generator) GenerateReply(ctx context.Context, text string) (string, err
 		}
 
 		osmURL := osm.MakeUrl(coords.Latitude, coords.Longitude)
-		g.logger.Infow("Successfully converted URL", "googleMaps", url, "osm", osmURL)
+		osmAppURL := osm.MakeOSMAppUrl(coords.Latitude, coords.Longitude)
+		g.logger.Infow("Successfully converted URL", "googleMaps", url, "osm", osmURL, "osmApp", osmAppURL)
 		results = append(results, ConversionResult{
 			OriginalURL: url,
 			OSMUrl:      osmURL,
+			OSMAppUrl:   osmAppURL,
 		})
 		successCount++
 	}
@@ -75,15 +78,28 @@ func (g *Generator) formatReply(results []ConversionResult, successCount int) (s
 		return "Couldn't convert Google Maps link(s) to OpenStreetMap", nil
 	}
 
-	// Build the reply with all successful conversions
+	// Build the reply with all conversions (successful and failed)
 	var sb strings.Builder
 
+	sb.WriteString("Attempted to provide a link to OpenStreetMap for those Google Maps URLs:\n")
+
 	for _, result := range results {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+
 		if result.Error == nil {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
+			// Successful conversion
+			sb.WriteString("Successfully converted ")
+			sb.WriteString(result.OriginalURL)
+			sb.WriteString(" to ")
+			sb.WriteString(result.OSMAppUrl)
+			sb.WriteString(" or ")
 			sb.WriteString(result.OSMUrl)
+		} else {
+			// Failed conversion - inform the user
+			sb.WriteString("Couldn't convert ")
+			sb.WriteString(result.OriginalURL)
 		}
 	}
 
