@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
-	// "fmt"
 	zlog "log"
+	"time"
 
+	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/gmaps"
+	customMastodon "github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/mastodon"
+	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/ratelimit"
+	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/reply"
 	"github.com/mattn/go-mastodon"
 	"github.com/thought-machine/go-flags"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -12,51 +16,169 @@ import (
 )
 
 type Options struct {
-	Server       string `long:"server" description:"Mastodon server to connect to" default:"https://mastodon.bot"`
-	ClientID     string `long:"client-id" description:"Mastodon application client ID"`
-	ClientSecret string `long:"client-secret" description:"Mastodon application client secret"`
-	AccessToken  string `long:"access-token" description:"Mastodon application access token"`
-	Verbose      bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
+	Server       string        `long:"server" description:"Mastodon server to connect to" default:"https://mastodon.bot"`
+	ClientID     string        `long:"client-id" description:"Mastodon application client ID"`
+	ClientSecret string        `long:"client-secret" description:"Mastodon application client secret"`
+	AccessToken  string        `long:"access-token" description:"Mastodon application access token"`
+	Verbose      bool          `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
+	MaxRedirects int           `long:"max-redirects" description:"Maximum number of HTTP redirects to follow" default:"5"`
+	PollInterval time.Duration `long:"poll-interval" description:"How often to poll for new notifications (minimum 60s)" default:"60s"`
 }
 
-// Preform user actions wihtout having to re-authenticate again
-func doUserActions(log *zap.SugaredLogger, config *mastodon.Config) {
+// Bot represents the main bot instance
+type Bot struct {
+	client         *mastodon.Client
+	replyChecker   *customMastodon.ReplyChecker
+	replyGenerator *reply.Generator
+	logger         *zap.SugaredLogger
+	botAccountID   mastodon.ID
+}
 
-	// instanciate the new client
-	c := mastodon.NewClient(config)
+// NewBot creates a new bot instance
+func NewBot(config *mastodon.Config, httpClient *ratelimit.RateLimitedClient, logger *zap.SugaredLogger) (*Bot, error) {
+	client := mastodon.NewClient(config)
 
-	// Let's do some actions on behalf of the user!
-	var pg mastodon.Pagination
-	notifs, err := c.GetNotifications(context.Background(), &pg)
+	// Verify credentials and get bot account ID
+	ctx := context.Background()
+	account, err := client.GetAccountCurrentUser(ctx)
 	if err != nil {
-		log.Fatal("Failed to get notifications", "error", err)
+		return nil, err
 	}
-	for _, n := range notifs {
-		log.Info("Got notification", "notification", n, "type", n.Type)
-		log.Info("Is the type a mention?", "mention", n.Type == "mention")
+
+	logger.Infow("Bot account verified", "username", account.Username, "id", account.ID)
+
+	// Set up components
+	extractor := gmaps.NewExtractor(httpClient, logger)
+	replyGen := reply.NewGenerator(extractor, logger)
+	replyCheck := customMastodon.NewReplyChecker(client, logger)
+
+	return &Bot{
+		client:         client,
+		replyChecker:   replyCheck,
+		replyGenerator: replyGen,
+		logger:         logger,
+		botAccountID:   account.ID,
+	}, nil
+}
+
+// processNotifications fetches and processes all pending mention notifications
+func (b *Bot) processNotifications(ctx context.Context) error {
+	var pg mastodon.Pagination
+	pg.Limit = 20 // Process up to 20 notifications at a time
+
+	for {
+		notifs, err := b.client.GetNotifications(ctx, &pg)
+		if err != nil {
+			return err
+		}
+
+		if len(notifs) == 0 {
+			b.logger.Debug("No more notifications to process")
+			break
+		}
+
+		b.logger.Infow("Fetched notifications", "count", len(notifs))
+
+		// Process each notification
+		for _, notif := range notifs {
+			if notif.Type != "mention" {
+				b.logger.Debugw("Skipping non-mention notification", "type", notif.Type, "id", notif.ID)
+				continue
+			}
+
+			if err := b.processMention(ctx, notif); err != nil {
+				b.logger.Errorw("Failed to process mention", "notificationID", notif.ID, "error", err)
+				// Continue processing other notifications even if one fails
+				continue
+			}
+
+			// Dismiss the notification after successful processing
+			if err := b.client.DismissNotification(ctx, notif.ID); err != nil {
+				b.logger.Warnw("Failed to dismiss notification", "notificationID", notif.ID, "error", err)
+				// Not fatal, continue
+			} else {
+				b.logger.Debugw("Dismissed notification", "notificationID", notif.ID)
+			}
+		}
+
+		// Check if there are more pages
+		if pg.MaxID == "" {
+			break
+		}
 	}
-	// filter only for mentions
-	// do the replies, with a pool of goroutines to ensure we don't do too many?
-	// dismiss the notification once we do the reply
-	// continue paging through
-	// fmt.Printf("notifications are %+v\n", notifs)
 
-	// finalText := "this is the content of my new post!"
-	// visibility := "public"
+	return nil
+}
 
-	// // Post a toot
-	// toot := mastodon.Toot{
-	// 	Status:     finalText,
-	// 	Visibility: visibility,
-	// }
-	// post, err := c.PostStatus(context.Background(), &toot)
+// processMention handles a single mention notification
+func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) error {
+	status := notif.Status
+	if status == nil {
+		b.logger.Warnw("Mention notification has no status", "notificationID", notif.ID)
+		return nil
+	}
 
-	// if err != nil {
-	// 	log.Fatalf("%#v\n", err)
-	// }
+	b.logger.Infow("Processing mention", "statusID", status.ID, "from", notif.Account.Username)
 
-	// fmt.Printf("My new post is %v\n", post)
+	// Check if we've already replied to this status
+	alreadyReplied, err := b.replyChecker.HasAlreadyReplied(ctx, status.ID, b.botAccountID)
+	if err != nil {
+		return err
+	}
 
+	if alreadyReplied {
+		b.logger.Infow("Already replied to this status, skipping", "statusID", status.ID)
+		return nil
+	}
+
+	// Generate the reply
+	replyText, err := b.replyGenerator.GenerateReply(ctx, status.Content)
+	if err != nil {
+		return err
+	}
+
+	// Post the reply
+	toot := &mastodon.Toot{
+		Status:      replyText,
+		InReplyToID: status.ID,
+		Visibility:  status.Visibility, // Match the visibility of the original post
+	}
+
+	postedStatus, err := b.client.PostStatus(ctx, toot)
+	if err != nil {
+		return err
+	}
+
+	b.logger.Infow("Posted reply", "statusID", postedStatus.ID, "inReplyTo", status.ID, "text", replyText)
+
+	return nil
+}
+
+// Run starts the bot's main polling loop
+func (b *Bot) Run(ctx context.Context, pollInterval time.Duration) {
+	b.logger.Infow("Starting bot polling loop", "interval", pollInterval)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Process notifications immediately on startup
+	if err := b.processNotifications(ctx); err != nil {
+		b.logger.Errorw("Error processing notifications", "error", err)
+	}
+
+	// Then continue polling
+	for {
+		select {
+		case <-ctx.Done():
+			b.logger.Info("Bot shutting down")
+			return
+		case <-ticker.C:
+			b.logger.Debug("Polling for notifications")
+			if err := b.processNotifications(ctx); err != nil {
+				b.logger.Errorw("Error processing notifications", "error", err)
+			}
+		}
+	}
 }
 
 func main() {
@@ -84,14 +206,29 @@ func main() {
 	undo := zap.RedirectStdLog(z)
 	defer undo()
 
+	// Validate poll interval
+	if opts.PollInterval < 60*time.Second {
+		log.Warnw("Poll interval too low, setting to minimum 60s", "requested", opts.PollInterval)
+		opts.PollInterval = 60 * time.Second
+	}
+
+	// Create rate-limited HTTP client (1 request per second)
+	httpClient := ratelimit.NewRateLimitedClient(opts.MaxRedirects, 1.0)
+
 	config := &mastodon.Config{
 		Server:       opts.Server,
 		ClientID:     opts.ClientID,
 		ClientSecret: opts.ClientSecret,
 		AccessToken:  opts.AccessToken,
 	}
-	// check credentials work
-	// do the actual thing, try not to do too many things at once, and have backoffs if we get 429s
-	// polling loop
-	doUserActions(log, config)
+
+	// Create and start the bot
+	bot, err := NewBot(config, httpClient, log)
+	if err != nil {
+		log.Fatalw("Failed to create bot", "error", err)
+	}
+
+	// Run the bot with a cancellable context
+	ctx := context.Background()
+	bot.Run(ctx, opts.PollInterval)
 }
