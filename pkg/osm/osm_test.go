@@ -5,9 +5,7 @@ import (
 
 	"github.com/RichardoC/gMapsToOSM-mastodon-bot/pkg/osm"
 
-
 	"github.com/stretchr/testify/assert"
-
 )
 
 func TestMakeUrl(t *testing.T) {

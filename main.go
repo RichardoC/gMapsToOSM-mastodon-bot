@@ -172,7 +172,7 @@ func (b *Bot) Run(ctx context.Context, basePollInterval time.Duration) {
 	// Then continue polling
 	for {
 		// Add jitter: ±10% of current interval
-		jitter := time.Duration(rand.Int63n(int64(currentInterval) / 5)) - currentInterval/10
+		jitter := time.Duration(rand.Int63n(int64(currentInterval)/5)) - currentInterval/10
 		nextPoll := currentInterval + jitter
 
 		b.logger.Debugw("Scheduling next poll", "interval", nextPoll, "jitter", jitter)
