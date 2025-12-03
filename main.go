@@ -138,11 +138,18 @@ func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) 
 
 	// If this is a reply, also check the parent status
 	if status.InReplyToID != nil {
-		b.logger.Debugw("Status is a reply", "InReplyToID", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
-		parentID, ok := status.InReplyToID.(mastodon.ID)
-		if !ok {
-			b.logger.Warnw("Type assertion failed for InReplyToID", "value", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
-		} else {
+		// InReplyToID can be either a string or mastodon.ID, try both
+		var parentID mastodon.ID
+		switch v := status.InReplyToID.(type) {
+		case string:
+			parentID = mastodon.ID(v)
+		case mastodon.ID:
+			parentID = v
+		default:
+			b.logger.Warnw("Unexpected type for InReplyToID", "value", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
+		}
+
+		if parentID != "" {
 			b.logger.Debugw("Fetching parent status", "parentID", parentID)
 			parentStatus, err := b.client.GetStatus(ctx, parentID)
 			if err != nil {
