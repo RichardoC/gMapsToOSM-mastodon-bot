@@ -17,7 +17,7 @@ import (
 )
 
 type Options struct {
-	Server       string        `long:"server" description:"Mastodon server to connect to" default:"https://mastodon.bot"`
+	Server       string        `long:"server" description:"Mastodon server to connect to" default:"https://c.im"`
 	ClientID     string        `long:"client-id" description:"Mastodon application client ID"`
 	ClientSecret string        `long:"client-secret" description:"Mastodon application client secret"`
 	AccessToken  string        `long:"access-token" description:"Mastodon application access token"`
