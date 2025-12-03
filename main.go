@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	zlog "log"
 	"math/rand"
 	"time"
@@ -137,8 +138,11 @@ func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) 
 
 	// If this is a reply, also check the parent status
 	if status.InReplyToID != nil {
+		b.logger.Debugw("Status is a reply", "InReplyToID", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
 		parentID, ok := status.InReplyToID.(mastodon.ID)
-		if ok {
+		if !ok {
+			b.logger.Warnw("Type assertion failed for InReplyToID", "value", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
+		} else {
 			b.logger.Debugw("Fetching parent status", "parentID", parentID)
 			parentStatus, err := b.client.GetStatus(ctx, parentID)
 			if err != nil {
