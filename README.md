@@ -54,3 +54,13 @@ Create two users, and make a status tagging one with a message containing a goog
 ```
 go run . --client-id=FROM_INSTANCE --client-secret=FROM_INSTANCE  --access-token=FROM_INSTANCE --server=http://localhost:8080
 ```
+
+### Required permissions/scopes
+
+```text
+read:notifications 
+read:statuses 
+profile 
+write:notifications 
+write:statuses
+```

@@ -57,12 +57,10 @@ func (g *Generator) GenerateReply(ctx context.Context, text string) (string, err
 			continue
 		}
 
-		osmURL := osm.MakeUrl(coords.Latitude, coords.Longitude)
 		osmAppURL := osm.MakeOSMAppUrl(coords.Latitude, coords.Longitude)
-		g.logger.Infow("Successfully converted URL", "googleMaps", url, "osm", osmURL, "osmApp", osmAppURL)
+		g.logger.Infow("Successfully converted URL", "googleMaps", url, "osmApp", osmAppURL)
 		results = append(results, ConversionResult{
 			OriginalURL: url,
-			OSMUrl:      osmURL,
 			OSMAppUrl:   osmAppURL,
 		})
 		successCount++
