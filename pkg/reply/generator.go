@@ -31,10 +31,11 @@ type ConversionResult struct {
 	Error       error
 }
 
-// GenerateReply processes the given text, extracts Google Maps URLs, and generates a reply
-func (g *Generator) GenerateReply(ctx context.Context, text string) (string, error) {
-	// Extract all Google Maps URLs from the text
-	googleMapsURLs := gmaps.ExtractGoogleMapsURLs(text)
+// GenerateReply processes the given texts, extracts Google Maps URLs, and generates a reply
+func (g *Generator) GenerateReply(ctx context.Context, texts ...string) (string, error) {
+	// Combine all texts and extract Google Maps URLs
+	combinedText := strings.Join(texts, " ")
+	googleMapsURLs := gmaps.ExtractGoogleMapsURLs(combinedText)
 
 	if len(googleMapsURLs) == 0 {
 		return "No Google Maps URLs found", nil

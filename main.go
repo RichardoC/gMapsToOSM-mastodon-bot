@@ -132,8 +132,27 @@ func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) 
 		return nil
 	}
 
+	// Collect texts to scan for Google Maps URLs
+	textsToScan := []string{status.Content}
+
+	// If this is a reply, also check the parent status
+	if status.InReplyToID != nil {
+		parentID, ok := status.InReplyToID.(mastodon.ID)
+		if ok {
+			b.logger.Debugw("Fetching parent status", "parentID", parentID)
+			parentStatus, err := b.client.GetStatus(ctx, parentID)
+			if err != nil {
+				b.logger.Warnw("Failed to fetch parent status, continuing without it", "parentID", parentID, "error", err)
+				// Continue without parent - not a fatal error
+			} else {
+				b.logger.Debugw("Including parent status content", "parentID", parentID)
+				textsToScan = append(textsToScan, parentStatus.Content)
+			}
+		}
+	}
+
 	// Generate the reply
-	replyText, err := b.replyGenerator.GenerateReply(ctx, status.Content)
+	replyText, err := b.replyGenerator.GenerateReply(ctx, textsToScan...)
 	if err != nil {
 		return err
 	}
