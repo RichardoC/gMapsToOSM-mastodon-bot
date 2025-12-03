@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	zlog "log"
 	"math/rand"
 	"time"
@@ -132,8 +133,37 @@ func (b *Bot) processMention(ctx context.Context, notif *mastodon.Notification) 
 		return nil
 	}
 
+	// Collect texts to scan for Google Maps URLs
+	textsToScan := []string{status.Content}
+
+	// If this is a reply, also check the parent status
+	if status.InReplyToID != nil {
+		// InReplyToID can be either a string or mastodon.ID, try both
+		var parentID mastodon.ID
+		switch v := status.InReplyToID.(type) {
+		case string:
+			parentID = mastodon.ID(v)
+		case mastodon.ID:
+			parentID = v
+		default:
+			b.logger.Warnw("Unexpected type for InReplyToID", "value", status.InReplyToID, "type", fmt.Sprintf("%T", status.InReplyToID))
+		}
+
+		if parentID != "" {
+			b.logger.Debugw("Fetching parent status", "parentID", parentID)
+			parentStatus, err := b.client.GetStatus(ctx, parentID)
+			if err != nil {
+				b.logger.Warnw("Failed to fetch parent status, continuing without it", "parentID", parentID, "error", err)
+				// Continue without parent - not a fatal error
+			} else {
+				b.logger.Debugw("Including parent status content", "parentID", parentID)
+				textsToScan = append(textsToScan, parentStatus.Content)
+			}
+		}
+	}
+
 	// Generate the reply
-	replyText, err := b.replyGenerator.GenerateReply(ctx, status.Content)
+	replyText, err := b.replyGenerator.GenerateReply(ctx, textsToScan...)
 	if err != nil {
 		return err
 	}
